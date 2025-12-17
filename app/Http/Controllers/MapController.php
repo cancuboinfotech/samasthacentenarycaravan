@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Caravan;
+use App\Models\Destination;
 use Illuminate\Http\Request;
 
 class MapController extends Controller
@@ -14,7 +15,12 @@ class MapController extends Controller
             ->whereHas('latestLocation')
             ->get();
 
-        return view('map.index', compact('caravans'));
+        $destinations = Destination::where('is_active', true)
+            ->orderBy('order')
+            ->orderBy('name')
+            ->get();
+
+        return view('map.index', compact('caravans', 'destinations'));
     }
 
     public function show(Caravan $caravan)
@@ -25,7 +31,12 @@ class MapController extends Controller
             ->limit(500)
             ->get();
 
-        return view('map.show', compact('caravan', 'locations'));
+        $destinations = Destination::where('is_active', true)
+            ->orderBy('order')
+            ->orderBy('name')
+            ->get();
+
+        return view('map.show', compact('caravan', 'locations', 'destinations'));
     }
 }
 

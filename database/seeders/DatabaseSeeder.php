@@ -10,6 +10,10 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call([
+            AdminSeeder::class,
+        ]);
+
         // Create sample caravans
         $caravan1 = Caravan::create([
             'name' => 'Samastha Centenary Caravan 1',

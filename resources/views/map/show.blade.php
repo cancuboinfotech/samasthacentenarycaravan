@@ -25,6 +25,14 @@
                     </div>
                 @endif
 
+                <!-- Map Controls -->
+                <div class="mb-4 flex flex-wrap gap-2">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="showDestinations" checked onchange="toggleDestinations()" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        <span class="ml-2 text-sm text-gray-700">Show Destinations</span>
+                    </label>
+                </div>
+
                 <!-- Map Container -->
                 <div id="map" style="height: 600px; width: 100%;"></div>
 
@@ -77,22 +85,28 @@
     let map;
     let polyline;
     let updateInterval;
+    let destinationMarkers = [];
 
     function initMap() {
         @if($caravan->latestLocation)
             const centerLat = {{ $caravan->latestLocation->latitude }};
             const centerLng = {{ $caravan->latestLocation->longitude }};
         @else
-            const centerLat = 20.5937;
-            const centerLng = 78.9629;
+            const centerLat = 10.5276;
+            const centerLng = 76.2144;
         @endif
 
-        map = L.map('map').setView([centerLat, centerLng], 12);
+        map = L.map('map').setView([centerLat, centerLng], 8);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors',
             maxZoom: 19
         }).addTo(map);
+
+        // Add destination markers
+        @foreach($destinations as $destination)
+            addDestinationMarker({{ $destination->id }}, {{ $destination->latitude }}, {{ $destination->longitude }}, '{{ addslashes($destination->name) }}', '{{ addslashes($destination->city ?? '') }}', '{{ addslashes($destination->state ?? '') }}', {{ $destination->order }});
+        @endforeach
 
         // Add route polyline
         const routeCoordinates = [
@@ -108,8 +122,56 @@
                 opacity: 0.7
             }).addTo(map);
 
-            map.fitBounds(polyline.getBounds());
+            // Fit bounds to include both route and destinations
+            const bounds = polyline.getBounds();
+            destinationMarkers.forEach(marker => {
+                bounds.extend(marker.getLatLng());
+            });
+            map.fitBounds(bounds);
+        } else {
+            // If no route, fit to destinations
+            if (destinationMarkers.length > 0) {
+                const group = new L.featureGroup(destinationMarkers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
         }
+    }
+
+    function addDestinationMarker(destinationId, lat, lng, name, city, state, order) {
+        // Custom icon for destinations - red pin
+        const icon = L.divIcon({
+            className: 'destination-marker',
+            html: `<div style="background-color: #EF4444; color: white; border-radius: 50% 50% 50% 0; width: 25px; height: 30px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); transform: rotate(-45deg);">
+                <span style="transform: rotate(45deg); font-size: 12px;">📍</span>
+            </div>`,
+            iconSize: [25, 30],
+            iconAnchor: [12, 30]
+        });
+
+        const marker = L.marker([lat, lng], { icon: icon }).addTo(map);
+        
+        const locationText = city && state ? `${city}, ${state}` : (city || state || '');
+        marker.bindPopup(`
+            <div>
+                <h3 class="font-bold text-red-600">📍 ${name}</h3>
+                ${locationText ? `<p class="text-sm text-gray-600">${locationText}</p>` : ''}
+                ${order ? `<p class="text-xs text-gray-500">Order: ${order}</p>` : ''}
+            </div>
+        `);
+
+        destinationMarkers.push(marker);
+    }
+
+    function toggleDestinations() {
+        const show = document.getElementById('showDestinations').checked;
+        destinationMarkers.forEach(marker => {
+            if (show) {
+                marker.addTo(map);
+            } else {
+                map.removeLayer(marker);
+            }
+        });
+    }
 
         // Add markers for each location point
         @foreach($locations as $location)
