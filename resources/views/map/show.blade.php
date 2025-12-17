@@ -25,6 +25,16 @@
                     </div>
                 @endif
 
+                <!-- Destinations with Travel Info -->
+                @if($destinations->count() > 0)
+                    <div class="mb-4 p-4 bg-green-50 rounded-lg">
+                        <h3 class="font-semibold mb-2">Destinations & Travel Time</h3>
+                        <div id="destinations-travel-info" class="space-y-2">
+                            <p class="text-sm text-gray-600">Loading travel information...</p>
+                        </div>
+                    </div>
+                @endif
+
                 <!-- Map Controls -->
                 <div class="mb-4 flex flex-wrap gap-2">
                     <label class="flex items-center">
@@ -124,8 +134,8 @@
 
             // Fit bounds to include both route and destinations
             const bounds = polyline.getBounds();
-            destinationMarkers.forEach(marker => {
-                bounds.extend(marker.getLatLng());
+            destinationMarkers.forEach(item => {
+                bounds.extend(item.marker.getLatLng());
             });
             map.fitBounds(bounds);
         } else {
@@ -151,24 +161,77 @@
         const marker = L.marker([lat, lng], { icon: icon }).addTo(map);
         
         const locationText = city && state ? `${city}, ${state}` : (city || state || '');
-        marker.bindPopup(`
+        
+        // Create popup content with route info placeholder
+        let popupContent = `
             <div>
                 <h3 class="font-bold text-red-600">📍 ${name}</h3>
                 ${locationText ? `<p class="text-sm text-gray-600">${locationText}</p>` : ''}
                 ${order ? `<p class="text-xs text-gray-500">Order: ${order}</p>` : ''}
+                <div id="route-info-${destinationId}" class="mt-2">
+                    <p class="text-xs text-gray-500">Loading travel info...</p>
+                </div>
             </div>
-        `);
+        `;
+        
+        marker.bindPopup(popupContent);
+        marker.on('popupopen', function() {
+            loadRouteInfo(destinationId, lat, lng);
+        });
 
-        destinationMarkers.push(marker);
+        destinationMarkers.push({marker: marker, id: destinationId, lat: lat, lng: lng});
+    }
+
+    function loadRouteInfo(destinationId, destLat, destLng) {
+        @if($caravan->latestLocation)
+            const currentLat = {{ $caravan->latestLocation->latitude }};
+            const currentLng = {{ $caravan->latestLocation->longitude }};
+            
+            fetch(`/api/route?lat1=${currentLat}&lon1=${currentLng}&lat2=${destLat}&lon2=${destLng}`)
+                .then(response => response.json())
+                .then(data => {
+                    updateDestinationPopup(destinationId, data);
+                })
+                .catch(error => {
+                    console.error('Error loading route info:', error);
+                    const routeInfoDiv = document.getElementById(`route-info-${destinationId}`);
+                    if (routeInfoDiv) {
+                        routeInfoDiv.innerHTML = '<p class="text-xs text-red-500">Unable to load travel info</p>';
+                    }
+                });
+        @else
+            const routeInfoDiv = document.getElementById(`route-info-${destinationId}`);
+            if (routeInfoDiv) {
+                routeInfoDiv.innerHTML = '<p class="text-xs text-gray-500">No current location available</p>';
+            }
+        @endif
+    }
+
+    function updateDestinationPopup(destinationId, routeData) {
+        const routeInfoDiv = document.getElementById(`route-info-${destinationId}`);
+        if (!routeInfoDiv) return;
+
+        const hours = routeData.duration_hours || 0;
+        const minutes = routeData.duration_minutes || Math.round(routeData.duration);
+        const timeText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        
+        routeInfoDiv.innerHTML = `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <p class="text-xs font-semibold text-gray-700">Travel Information:</p>
+                <p class="text-xs text-gray-600">📏 Distance: <span class="font-semibold">${routeData.distance} km</span></p>
+                <p class="text-xs text-gray-600">⏱️ Duration: <span class="font-semibold">${timeText}</span></p>
+                ${routeData.status === 'estimated' ? '<p class="text-xs text-yellow-600">⚠️ Estimated (straight-line)</p>' : ''}
+            </div>
+        `;
     }
 
     function toggleDestinations() {
         const show = document.getElementById('showDestinations').checked;
-        destinationMarkers.forEach(marker => {
+        destinationMarkers.forEach(item => {
             if (show) {
-                marker.addTo(map);
+                item.marker.addTo(map);
             } else {
-                map.removeLayer(marker);
+                map.removeLayer(item.marker);
             }
         });
     }
@@ -223,8 +286,59 @@
             .catch(error => console.error('Error updating location:', error));
     }
 
+    // Load travel information for all destinations
+    function loadAllDestinationsTravelInfo() {
+        @if($caravan->latestLocation && $destinations->count() > 0)
+            const currentLat = {{ $caravan->latestLocation->latitude }};
+            const currentLng = {{ $caravan->latestLocation->longitude }};
+            const caravanId = {{ $caravan->id }};
+            
+            fetch(`/api/caravans/${caravanId}/routes`)
+                .then(response => response.json())
+                .then(data => {
+                    const infoDiv = document.getElementById('destinations-travel-info');
+                    if (!infoDiv) return;
+                    
+                    if (data.destinations && Object.keys(data.destinations).length > 0) {
+                        let html = '<div class="space-y-2">';
+                        Object.values(data.destinations).forEach(dest => {
+                            const hours = dest.duration_hours || 0;
+                            const minutes = dest.duration_minutes || Math.round(dest.duration);
+                            const timeText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+                            
+                            html += `
+                                <div class="flex justify-between items-center p-2 bg-white rounded border">
+                                    <div>
+                                        <p class="text-sm font-semibold">📍 ${dest.destination_name}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-gray-600">${dest.distance} km</p>
+                                        <p class="text-xs font-semibold text-indigo-600">${timeText}</p>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        infoDiv.innerHTML = html;
+                    } else {
+                        infoDiv.innerHTML = '<p class="text-sm text-gray-500">No destinations available</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading destinations travel info:', error);
+                    const infoDiv = document.getElementById('destinations-travel-info');
+                    if (infoDiv) {
+                        infoDiv.innerHTML = '<p class="text-sm text-red-500">Unable to load travel information</p>';
+                    }
+                });
+        @endif
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         initMap();
+        
+        // Load destinations travel info
+        loadAllDestinationsTravelInfo();
         
         // Update location every 30 seconds
         updateInterval = setInterval(updateLocation, 30000);

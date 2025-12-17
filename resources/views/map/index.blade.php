@@ -98,6 +98,8 @@
         @endforeach
     }
 
+    let routeInfo = {};
+
     function addDestinationMarker(destinationId, lat, lng, name, city, state, order) {
         // Custom icon for destinations - red pin
         const icon = L.divIcon({
@@ -112,15 +114,66 @@
         const marker = L.marker([lat, lng], { icon: icon }).addTo(map);
         
         const locationText = city && state ? `${city}, ${state}` : (city || state || '');
-        marker.bindPopup(`
+        
+        // Create popup content
+        let popupContent = `
             <div>
                 <h3 class="font-bold text-red-600">📍 ${name}</h3>
                 ${locationText ? `<p class="text-sm text-gray-600">${locationText}</p>` : ''}
                 ${order ? `<p class="text-xs text-gray-500">Order: ${order}</p>` : ''}
+                <div id="route-info-${destinationId}" class="mt-2">
+                    <p class="text-xs text-gray-500">Loading travel info...</p>
+                </div>
             </div>
-        `);
+        `;
+        
+        marker.bindPopup(popupContent);
+        marker.on('popupopen', function() {
+            loadRouteInfo(destinationId, lat, lng);
+        });
 
-        destinationMarkers.push(marker);
+        destinationMarkers.push({marker: marker, id: destinationId, lat: lat, lng: lng});
+    }
+
+    function loadRouteInfo(destinationId, destLat, destLng) {
+        // Get current caravan location (use first caravan if available)
+        @if($caravans->count() > 0 && $caravans->first()->latestLocation)
+            const currentLat = {{ $caravans->first()->latestLocation->latitude }};
+            const currentLng = {{ $caravans->first()->latestLocation->longitude }};
+            
+            fetch(`/api/route?lat1=${currentLat}&lon1=${currentLng}&lat2=${destLat}&lon2=${destLng}`)
+                .then(response => response.json())
+                .then(data => {
+                    routeInfo[destinationId] = data;
+                    updateDestinationPopup(destinationId, data);
+                })
+                .catch(error => {
+                    console.error('Error loading route info:', error);
+                    document.getElementById(`route-info-${destinationId}`).innerHTML = 
+                        '<p class="text-xs text-red-500">Unable to load travel info</p>';
+                });
+        @else
+            document.getElementById(`route-info-${destinationId}`).innerHTML = 
+                '<p class="text-xs text-gray-500">No caravan location available</p>';
+        @endif
+    }
+
+    function updateDestinationPopup(destinationId, routeData) {
+        const routeInfoDiv = document.getElementById(`route-info-${destinationId}`);
+        if (!routeInfoDiv) return;
+
+        const hours = routeData.duration_hours || 0;
+        const minutes = routeData.duration_minutes || Math.round(routeData.duration);
+        const timeText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        
+        routeInfoDiv.innerHTML = `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <p class="text-xs font-semibold text-gray-700">Travel Information:</p>
+                <p class="text-xs text-gray-600">📏 Distance: <span class="font-semibold">${routeData.distance} km</span></p>
+                <p class="text-xs text-gray-600">⏱️ Duration: <span class="font-semibold">${timeText}</span></p>
+                ${routeData.status === 'estimated' ? '<p class="text-xs text-yellow-600">⚠️ Estimated (straight-line)</p>' : ''}
+            </div>
+        `;
     }
 
     function addCaravanMarker(caravanId, lat, lng, name, vehicleNumber) {
@@ -147,11 +200,11 @@
 
     function toggleDestinations() {
         const show = document.getElementById('showDestinations').checked;
-        destinationMarkers.forEach(marker => {
+        destinationMarkers.forEach(item => {
             if (show) {
-                marker.addTo(map);
+                item.marker.addTo(map);
             } else {
-                map.removeLayer(marker);
+                map.removeLayer(item.marker);
             }
         });
     }
